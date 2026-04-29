@@ -51,3 +51,19 @@ message TransactionEvent {
     string event_type = 3; // e.g., "transaction.created", "transaction.approved"
     int64 timestamp = 4;
 }
+message SpendRequest {
+    string amount = 1; // Positive decimal
+    string currency = 2; // ISO code or crypto ticker
+    google.protobuf.Struct context = 3;
+    repeated Constraint constraints = 4;
+}
+
+message SpendResponse {
+    string transaction_id = 1;
+    string status = 2;
+    string estimated_cost = 3;
+}
+
+service TransactionService {
+    rpc Spend(SpendRequest) returns (SpendResponse);
+}

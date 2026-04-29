@@ -1,0 +1,49 @@
+_format_version: "1.1"
+_transform: true
+
+services:
+- name: orchestration-service
+  url: http://orchestration-service:8080
+  routes:
+  - name: spend-rest
+    paths:
+    - /spend
+    methods:
+    - POST
+  plugins:
+  - name: jwt
+    config:
+      header_names:
+      - Authorization
+      key_claim_name: iss
+  - name: rate-limiting
+    config:
+      minute: 100
+      policy: local
+      limit_by: consumer
+
+consumers:
+- username: agent-001
+  jwt_secrets:
+  - key: agent-money-issuer
+    secret: a36c30a0-d461-4b74-9d4a-384357a7d4c1
+
+- name: orchestration-grpc
+  url: grpc://orchestration-service:9090
+  routes:
+  - name: spend-grpc
+    protocols:
+    - grpc
+    paths:
+    - /agent_money.v1.TransactionService/Spend
+  plugins:
+  - name: jwt
+    config:
+      header_names:
+      - Authorization
+      key_claim_name: iss
+  - name: rate-limiting
+    config:
+      minute: 100
+      policy: local
+      limit_by: consumer
