@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package agent_money.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/galan/agent_money/proto/v1;agent_moneyv1";
+
+enum RailType {
+    RAIL_TYPE_UNSPECIFIED = 0;
+    RAIL_TYPE_LIGHTNING = 1;
+    RAIL_TYPE_STRIPE = 2;
+    RAIL_TYPE_STABLECOIN = 3;
+    RAIL_TYPE_X402 = 4;
+}
+
+enum TransactionStatus {
+    TRANSACTION_STATUS_UNSPECIFIED = 0;
+    TRANSACTION_STATUS_PENDING = 1;
+    TRANSACTION_STATUS_APPROVED = 2;
+    TRANSACTION_STATUS_EXECUTED = 3;
+    TRANSACTION_STATUS_SETTLED = 4;
+    TRANSACTION_STATUS_FAILED = 5;
+}
+
+message Money {
+    string currency_code = 1; // e.g., "USD", "BTC"
+    string amount = 2;        // Decimal string to avoid floating point issues
+}
+
+message Constraint {
+    string rule_id = 1;
+    google.protobuf.Struct parameters = 2;
+}
+
+message Transaction {
+    string transaction_id = 1; // UUID
+    Money amount = 2;
+    RailType rail_type = 3;
+    google.protobuf.Struct context = 4;
+    repeated Constraint constraints = 5;
+    TransactionStatus status = 6;
+    google.protobuf.Struct metadata = 7;
+    int64 created_at = 8;      // Unix timestamp
+    int64 updated_at = 9;      // Unix timestamp
+}
+
+message TransactionEvent {
+    string event_id = 1;
+    Transaction transaction = 2;
+    string event_type = 3; // e.g., "transaction.created", "transaction.approved"
+    int64 timestamp = 4;
+}
