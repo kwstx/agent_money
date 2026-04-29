@@ -52,8 +52,11 @@ services:
       context: ./services/policy-engine
     depends_on:
       - kafka
+      - postgres
     environment:
-      KAFKA_URL: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      DATABASE_URL: postgresql://admin:password@postgres:5432/agent_money
+
   redis:
     image: redis:alpine
     ports:

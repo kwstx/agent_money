@@ -1,2 +1,6 @@
+zen-engine==0.53.0
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+pydantic==2.5.3
 kafka-python==2.0.2
-protobuf==4.25.1
+python-dotenv==1.0.0

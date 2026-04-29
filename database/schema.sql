@@ -27,4 +27,18 @@ CREATE TABLE transaction_telemetry (
 SELECT create_hypertable('transaction_telemetry', 'time');
 
 -- Index for transaction_id on telemetry
-CREATE INDEX idx_telemetry_transaction_id ON transaction_telemetry (transaction_id, time DESC);
+-- Rules table for Policy Engine
+CREATE TABLE rules (
+    rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    priority INTEGER NOT NULL,
+    conditions JSONB NOT NULL, -- JSON array of expressions
+    actions JSONB NOT NULL,    -- e.g., {"type": "approve", "rails": ["lightning", "stripe"]}
+    parameters JSONB,          -- e.g., {"budget_remaining": 100.0, "risk_score_threshold": 0.1}
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for priority evaluation
+CREATE INDEX idx_rules_priority ON rules (priority ASC) WHERE active = TRUE;
+
