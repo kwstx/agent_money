@@ -73,6 +73,22 @@ CREATE TABLE audit_trail (
 
 CREATE INDEX idx_audit_trail_transaction_id ON audit_trail(transaction_id);
 
+-- Enforce Immutability on Audit Trail
+CREATE OR REPLACE FUNCTION block_immutable_changes()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Updates and Deletes are not allowed on this immutable table.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_trail_immutable_update
+BEFORE UPDATE ON audit_trail
+FOR EACH ROW EXECUTE FUNCTION block_immutable_changes();
+
+CREATE TRIGGER trg_audit_trail_immutable_delete
+BEFORE DELETE ON audit_trail
+FOR EACH ROW EXECUTE FUNCTION block_immutable_changes();
+
 -- Budgets table for historical tracking and enforcement
 CREATE TABLE budgets (
     agent_id UUID NOT NULL,

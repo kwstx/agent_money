@@ -10,7 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
-	// "github.com/galan/agent_money/proto/v1" // Assuming generated code
+	"github.com/galan/agent_money/pkg/telemetry"
+	"go.uber.org/zap"
 )
 
 // Simplified struct for demonstration since I haven't run protoc yet
@@ -27,14 +28,37 @@ type Transaction struct {
 }
 
 func main() {
+	ctx := context.Background()
+	telemetry.InitLogger("transaction-handler")
+	logger := telemetry.GetLogger()
+	defer logger.Sync()
+
+	collectorURL := os.Getenv("OTEL_COLLECTOR_URL")
+	if collectorURL == "" {
+		collectorURL = "localhost:4317"
+	}
+	shutdown, err := telemetry.InitTracer(ctx, "transaction-handler", collectorURL)
+	if err != nil {
+		logger.Fatal("Failed to initialize tracer", zap.Error(err))
+	}
+	defer shutdown(ctx)
+
+	kafkaURL := os.Getenv("KAFKA_URL")
+	if kafkaURL == "" {
+		kafkaURL = "localhost:9092"
+	}
+
 	writer := &kafka.Writer{
-		Addr:     kafka.TCP("localhost:9092"),
+		Addr:     kafka.TCP(kafkaURL),
 		Topic:    "transaction-events",
 		Balancer: &kafka.LeastBytes{},
 	}
 	defer writer.Close()
 
 	http.HandleFunc("/transactions", func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := telemetry.Tracer.Start(r.Context(), "handleTransaction")
+		defer span.End()
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -42,6 +66,7 @@ func main() {
 
 		var tx Transaction
 		if err := json.NewDecoder(r.Body).Decode(&tx); err != nil {
+			logger.Error("Failed to decode transaction", zap.Error(err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -50,8 +75,10 @@ func main() {
 		tx.Status = "PENDING"
 		tx.CreatedAt = time.Now().Unix()
 
+		logger.Info("Received transaction", zap.String("tx_id", tx.ID), zap.String("rail", tx.RailType))
+
 		payload, _ := json.Marshal(tx)
-		err := writer.WriteMessages(context.Background(),
+		err := writer.WriteMessages(ctx,
 			kafka.Message{
 				Key:   []byte(tx.ID),
 				Value: payload,
@@ -59,7 +86,7 @@ func main() {
 		)
 
 		if err != nil {
-			log.Printf("failed to write messages: %v", err)
+			logger.Error("Failed to write to Kafka", zap.Error(err), zap.String("tx_id", tx.ID))
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}

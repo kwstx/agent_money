@@ -10,4 +10,7 @@ require (
 	github.com/shopspring/decimal v1.3.1
 	github.com/avast/retry-go/v4 v4.5.0
 	github.com/sony/gobreaker v0.5.0
+	github.com/galan/agent_money/pkg/telemetry v0.0.0
 )
+
+replace github.com/galan/agent_money/pkg/telemetry => ../../pkg/telemetry

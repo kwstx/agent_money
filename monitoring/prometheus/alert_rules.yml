@@ -1,0 +1,29 @@
+groups:
+  - name: agent_money_alerts
+    rules:
+      - alert: SuddenSpendSpike
+        expr: sum(rate(spend_requests_total[5m])) > 2 * avg_over_time(sum(rate(spend_requests_total[5m]))[1h:5m])
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sudden spend spike detected for agent {{ $labels.agent_id }}"
+          description: "Spend rate is more than 2x the hourly average."
+
+      - alert: HighRailFailureRate
+        expr: rate(rail_execution_total{status="failure"}[5m]) / rate(rail_execution_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rail failure rate detected"
+          description: "Rail failure rate is above 10% for {{ $labels.rail }}."
+
+      - alert: BudgetUtilizationHigh
+        expr: budget_utilization_ratio > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent budget utilization is high"
+          description: "Agent {{ $labels.agent_id }} has used over 90% of their daily budget."

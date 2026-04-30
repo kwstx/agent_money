@@ -56,6 +56,8 @@ services:
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       DATABASE_URL: postgresql://admin:password@postgres:5432/agent_money
+      OTEL_COLLECTOR_URL: otel-collector:4317
+      RISK_SERVICE_URL: http://risk-service:8082
 
   redis:
     image: redis:alpine
@@ -72,6 +74,7 @@ services:
       REDIS_URL: redis:6379
       TRANSACTION_HANDLER_URL: http://transaction-handler:8080
       DATABASE_URL: postgres://admin:password@postgres:5432/agent_money?sslmode=disable
+      OTEL_COLLECTOR_URL: otel-collector:4317
 
   metering-service:
     build:
@@ -105,3 +108,27 @@ services:
       - "8000:8000"
       - "8001:8001"
       - "8443:8443"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./monitoring/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      - jaeger
+    ports:
+      - "4317" # OTLP gRPC
+      - "8889" # Prometheus exporter
