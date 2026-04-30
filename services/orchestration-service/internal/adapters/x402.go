@@ -97,10 +97,16 @@ func (a *X402Adapter) GetCostEstimate(amount float64, context map[string]interfa
 	return 0.05, nil
 }
 
-func (a *X402Adapter) GetLatencyEstimate() int {
-	return 1500
+func (a *X402Adapter) GetCapabilities() RailCapabilities {
+	return RailCapabilities{
+		SupportedCurrencies: []string{"BTC", "USDC"},
+		TypicalLatency:      1500,
+		CostProfile:         "negotiated",
+		ReliabilityScore:    0.96,
+	}
 }
 
-func (a *X402Adapter) HealthCheck() bool {
+func (a *X402Adapter) HealthCheck(ctx context.Context) bool {
+	// Periodic health checks are handled by the discovery mechanism
 	return true
 }

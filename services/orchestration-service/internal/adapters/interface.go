@@ -23,6 +23,14 @@ type ExecutionResult struct {
 	Error         error                  `json:"error,omitempty"`
 }
 
+// RailCapabilities defines the operational profile of a payment rail
+type RailCapabilities struct {
+	SupportedCurrencies []string `json:"supported_currencies"`
+	TypicalLatency      int      `json:"typical_latency_ms"`
+	CostProfile         string   `json:"cost_profile"` // e.g., "flat", "percentage", "hybrid"
+	ReliabilityScore    float64  `json:"reliability_score"` // 0.0 to 1.0
+}
+
 // RailAdapter defines the interface for different payment rails
 type RailAdapter interface {
 	// Execute performs the actual payment transaction
@@ -31,11 +39,11 @@ type RailAdapter interface {
 	// GetCostEstimate returns the estimated fee for the transaction
 	GetCostEstimate(amount float64, context map[string]interface{}) (float64, error)
 
-	// GetLatencyEstimate returns the expected time for completion in milliseconds
-	GetLatencyEstimate() int
+	// GetCapabilities returns the static and dynamic capabilities of the rail
+	GetCapabilities() RailCapabilities
 
-	// HealthCheck returns the current status of the rail provider
-	HealthCheck() bool
+	// HealthCheck returns true if the rail is operational
+	HealthCheck(ctx context.Context) bool
 
 	// GetID returns the unique identifier for this adapter
 	GetID() string

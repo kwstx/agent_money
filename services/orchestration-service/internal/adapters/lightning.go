@@ -69,10 +69,16 @@ func (a *LightningAdapter) GetCostEstimate(amount float64, context map[string]in
 	return 0.0001, nil
 }
 
-func (a *LightningAdapter) GetLatencyEstimate() int {
-	return 500
+func (a *LightningAdapter) GetCapabilities() RailCapabilities {
+	return RailCapabilities{
+		SupportedCurrencies: []string{"BTC"},
+		TypicalLatency:      500,
+		CostProfile:         "flat",
+		ReliabilityScore:    0.98,
+	}
 }
 
-func (a *LightningAdapter) HealthCheck() bool {
+func (a *LightningAdapter) HealthCheck(ctx context.Context) bool {
+	// In a real implementation, ping LND node
 	return true
 }

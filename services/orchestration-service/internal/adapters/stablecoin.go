@@ -72,19 +72,30 @@ func (a *StablecoinAdapter) GetCostEstimate(amount float64, context map[string]i
 	}
 }
 
-func (a *StablecoinAdapter) GetLatencyEstimate() int {
+func (a *StablecoinAdapter) GetCapabilities() RailCapabilities {
+	latency := 5000
+	reliability := 0.95
 	switch a.Chain {
 	case "ethereum":
-		return 15000
+		latency = 15000
+		reliability = 0.99
 	case "polygon":
-		return 2000
+		latency = 2000
+		reliability = 0.97
 	case "solana":
-		return 400
-	default:
-		return 5000
+		latency = 400
+		reliability = 0.90
+	}
+
+	return RailCapabilities{
+		SupportedCurrencies: []string{"USDC", "USDT", "DAI"},
+		TypicalLatency:      latency,
+		CostProfile:         "gas-variable",
+		ReliabilityScore:    reliability,
 	}
 }
 
-func (a *StablecoinAdapter) HealthCheck() bool {
+func (a *StablecoinAdapter) HealthCheck(ctx context.Context) bool {
+	// In a real implementation, check RPC node health
 	return true
 }

@@ -61,10 +61,16 @@ func (a *StripeAdapter) GetCostEstimate(amount float64, context map[string]inter
 	return (amount * 0.029) + 0.30, nil
 }
 
-func (a *StripeAdapter) GetLatencyEstimate() int {
-	return 2000
+func (a *StripeAdapter) GetCapabilities() RailCapabilities {
+	return RailCapabilities{
+		SupportedCurrencies: []string{"USD", "EUR", "GBP", "CAD"},
+		TypicalLatency:      2000,
+		CostProfile:         "percentage+flat",
+		ReliabilityScore:    0.999,
+	}
 }
 
-func (a *StripeAdapter) HealthCheck() bool {
+func (a *StripeAdapter) HealthCheck(ctx context.Context) bool {
+	// In a real implementation, ping Stripe API
 	return true
 }

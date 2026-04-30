@@ -134,7 +134,7 @@ func (s *SagaCoordinator) executeWithFallbacks(ctx context.Context, tx adapters.
 }
 
 func (s *SagaCoordinator) executeWithRetry(ctx context.Context, tx adapters.Transaction, adapterID string) (*adapters.ExecutionResult, error) {
-	adapter, exists := s.Engine.Adapters[adapterID]
+	adapter, exists := s.Engine.Registry.GetAdapter(adapterID)
 	if !exists {
 		return nil, fmt.Errorf("adapter %s not found", adapterID)
 	}

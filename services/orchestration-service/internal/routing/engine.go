@@ -18,28 +18,16 @@ type ExecutionPlan struct {
 }
 
 type RoutingEngine struct {
-	Adapters map[string]adapters.RailAdapter
+	Registry *adapters.RailRegistry
 }
 
-func NewRoutingEngine() *RoutingEngine {
-	engine := &RoutingEngine{
-		Adapters: make(map[string]adapters.RailAdapter),
+func NewRoutingEngine(registry *adapters.RailRegistry) *RoutingEngine {
+	return &RoutingEngine{
+		Registry: registry,
 	}
-	// Register default adapters with resilience wrappers
-	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewLightningAdapter()))
-	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewStripeAdapter()))
-	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewStablecoinAdapter("solana")))
-	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewStablecoinAdapter("ethereum")))
-	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewX402Adapter()))
-	
-	return engine
 }
 
-func (e *RoutingEngine) RegisterAdapter(a adapters.RailAdapter) {
-	e.Adapters[a.GetID()] = a
-}
-
-// ComputePlan selects the best adapter based on policy outputs and metrics
+// ComputePlan selects the best adapter based on policy outputs, static capabilities, and dynamic metrics
 func (e *RoutingEngine) ComputePlan(ctx context.Context, tx adapters.Transaction, policyResults map[string]interface{}) (*ExecutionPlan, error) {
 	type scoredAdapter struct {
 		id    string
@@ -48,29 +36,45 @@ func (e *RoutingEngine) ComputePlan(ctx context.Context, tx adapters.Transaction
 	
 	var candidates []scoredAdapter
 	
-	for id, adapter := range e.Adapters {
-		if !adapter.HealthCheck() {
+	allAdapters := e.Registry.ListAdapters()
+	
+	for _, adapter := range allAdapters {
+		id := adapter.GetID()
+		if !adapter.HealthCheck(ctx) {
 			continue
 		}
 
-		// Basic scoring logic:
-		// Higher score is better.
-		// Policy engine might provide multipliers or block certain rails.
+		caps := adapter.GetCapabilities()
+		availabilityScore := e.Registry.GetAvailabilityScore(id)
 		
+		// Check if currency is supported
+		supported := false
+		for _, c := range caps.SupportedCurrencies {
+			if c == tx.Currency {
+				supported = true
+				break
+			}
+		}
+		if !supported {
+			continue
+		}
+
 		cost, _ := adapter.GetCostEstimate(tx.Amount, tx.Context)
-		latency := float64(adapter.GetLatencyEstimate())
+		latency := float64(caps.TypicalLatency)
 		
-		// Normalized Cost (lower is better, so we use inverse)
+		// Normalized Cost (lower is better)
 		// Normalized Latency (lower is better)
 		
-		// Simple weights: 60% cost, 40% latency
-		// In a real system, these would come from the agent's policy metadata
+		// Scoring weights: 40% cost, 30% latency, 30% reliability/availability
 		costScore := 1.0 / (1.0 + cost)
 		latencyScore := 1.0 / (1.0 + (latency / 1000.0))
 		
-		baseScore := (costScore * 0.6) + (latencyScore * 0.4)
+		// Combine static reliability and dynamic availability
+		reliabilityScore := (caps.ReliabilityScore * 0.5) + (availabilityScore * 0.5)
 		
-		// Apply policy modifiers (e.g., if policy says "avoid-stripe", multiplier = 0.1)
+		baseScore := (costScore * 0.4) + (latencyScore * 0.3) + (reliabilityScore * 0.3)
+		
+		// Apply policy modifiers
 		multiplier := 1.0
 		if mod, ok := policyResults["rail_modifiers"].(map[string]interface{}); ok {
 			if m, exists := mod[id].(float64); exists {
@@ -85,7 +89,7 @@ func (e *RoutingEngine) ComputePlan(ctx context.Context, tx adapters.Transaction
 	}
 
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no healthy adapters available for transaction")
+		return nil, fmt.Errorf("no healthy/supported adapters available for transaction")
 	}
 
 	// Sort candidates by score descending
@@ -99,20 +103,21 @@ func (e *RoutingEngine) ComputePlan(ctx context.Context, tx adapters.Transaction
 		fallbackChain = append(fallbackChain, candidates[i].id)
 	}
 
-	bestAdapter := e.Adapters[best.id]
+	bestAdapter, _ := e.Registry.GetAdapter(best.id)
 	cost, _ := bestAdapter.GetCostEstimate(tx.Amount, tx.Context)
+	caps := bestAdapter.GetCapabilities()
 
 	return &ExecutionPlan{
 		AdapterID:     best.id,
 		Score:         best.score,
 		EstimatedCost: cost,
-		Latency:       bestAdapter.GetLatencyEstimate(),
+		Latency:       caps.TypicalLatency,
 		FallbackChain: fallbackChain,
 	}, nil
 }
 
 func (e *RoutingEngine) Dispatch(ctx context.Context, tx adapters.Transaction, plan *ExecutionPlan) (string, error) {
-	adapter, exists := e.Adapters[plan.AdapterID]
+	adapter, exists := e.Registry.GetAdapter(plan.AdapterID)
 	if !exists {
 		return "", fmt.Errorf("adapter %s not found", plan.AdapterID)
 	}
@@ -124,7 +129,10 @@ func (e *RoutingEngine) Dispatch(ctx context.Context, tx adapters.Transaction, p
 		log.Printf("[Router] Execution failed for %s: %v. Attempting fallbacks...", plan.AdapterID, err)
 		
 		for _, fallbackID := range plan.FallbackChain {
-			fallbackAdapter := e.Adapters[fallbackID]
+			fallbackAdapter, ok := e.Registry.GetAdapter(fallbackID)
+			if !ok {
+				continue
+			}
 			log.Printf("[Router] Trying fallback: %s", fallbackID)
 			res, fErr := fallbackAdapter.Execute(ctx, tx)
 			if fErr == nil {

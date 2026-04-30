@@ -104,8 +104,12 @@ func main() {
 	}
 	publisher := metering.NewEventPublisher(kafkaURL, "financial-events")
 
+	// Initialize Rail Registry and Discovery
+	registry := adapters.InitializeDefaultRegistry(ctx)
+	registry.StartDiscovery(ctx, 1*time.Minute)
+
 	// Initialize Routing Engine and Saga Coordinator
-	routingEngine = routing.NewRoutingEngine()
+	routingEngine = routing.NewRoutingEngine(registry)
 	sagaCoordinator = routing.NewSagaCoordinator(routingEngine, repo, publisher)
 
 	// Start HTTP server

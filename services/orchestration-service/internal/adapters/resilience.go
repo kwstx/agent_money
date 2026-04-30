@@ -52,12 +52,13 @@ func (w *ResilienceWrapper) GetCostEstimate(amount float64, context map[string]i
 	return w.adapter.GetCostEstimate(amount, context)
 }
 
-func (w *ResilienceWrapper) GetLatencyEstimate() int {
-	return w.adapter.GetLatencyEstimate()
+func (w *ResilienceWrapper) GetCapabilities() RailCapabilities {
+	return w.adapter.GetCapabilities()
 }
 
-func (w *ResilienceWrapper) HealthCheck() bool {
-	return w.adapter.HealthCheck()
+func (w *ResilienceWrapper) HealthCheck(ctx context.Context) bool {
+	// Return true if BOTH the underlying adapter is healthy AND the circuit breaker is closed
+	return w.adapter.HealthCheck(ctx) && w.cb.State() != gobreaker.StateOpen
 }
 
 func (w *ResilienceWrapper) GetID() string {
