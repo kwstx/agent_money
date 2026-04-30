@@ -98,3 +98,79 @@ CREATE TABLE ledger_entries (
 
 CREATE INDEX idx_ledger_transaction_id ON ledger_entries(transaction_id);
 CREATE INDEX idx_ledger_account_id ON ledger_entries(account_id);
+
+-- Authorization and Permissions System
+
+-- Organizations table for multi-tenancy and external IDP integration
+CREATE TABLE organizations (
+    org_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    external_id VARCHAR(255) UNIQUE, -- For OIDC/OAuth provider link
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Agents table with public key and API key authentication
+CREATE TABLE agents (
+    agent_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL REFERENCES organizations(org_id),
+    name VARCHAR(255) NOT NULL,
+    public_key TEXT,
+    api_key_hash TEXT,
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'suspended', 'deactivated'
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Workflows represent specific operational sequences that can have specific policies
+CREATE TABLE workflows (
+    workflow_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL REFERENCES organizations(org_id),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Permissions policies combining RBAC and ABAC
+CREATE TABLE policies (
+    policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL REFERENCES organizations(org_id),
+    name VARCHAR(255) NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT 'active', -- 'active', 'pending_approval', 'deprecated'
+    
+    -- RBAC: Roles associated with this policy
+    roles TEXT[] DEFAULT '{}', -- e.g., ['manager', 'executor']
+    
+    -- ABAC: Attribute-based constraints
+    attributes JSONB NOT NULL DEFAULT '{
+        "daily_budget": 0.0,
+        "task_cost_ceiling": 0.0,
+        "allowed_context_patterns": [],
+        "time_windows": []
+    }',
+    
+    -- Links: Policy can be applied to an agent or a specific workflow
+    agent_id UUID REFERENCES agents(agent_id),
+    workflow_id UUID REFERENCES workflows(workflow_id),
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_policies_org_id ON policies(org_id);
+CREATE INDEX idx_policies_agent_id ON policies(agent_id);
+CREATE INDEX idx_policies_workflow_id ON policies(workflow_id);
+
+-- Policy Approval Workflows for versioning and high-privilege changes
+CREATE TABLE policy_approvals (
+    approval_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_id UUID REFERENCES policies(policy_id),
+    proposed_by UUID NOT NULL, -- User/Admin ID
+    approver_id UUID,
+    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+    proposed_changes JSONB NOT NULL,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    decided_at TIMESTAMP WITH TIME ZONE
+);

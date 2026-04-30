@@ -12,9 +12,14 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func
 from pydantic import BaseModel
 
+import requests
+import re
+from datetime import datetime
+
 # Configuration
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092").split(",")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/agent_money")
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:8081")
 TOPIC_TRANSACTIONS = "transaction-events"
 CONSUMER_GROUP = "policy-engine-group"
 
@@ -59,39 +64,89 @@ class PolicyEngine:
                 logger.error(f"Failed to fetch rules from DB: {e}")
                 return []
 
-    def _get_metering_data(self, agent_id: str) -> Dict[str, Any]:
-        """
-        Computed derived values from the metering layer.
-        In a production system, this would involve a sub-5ms lookup 
-        from Redis or a specialized metering service.
-        """
-        # Simulated derived values
-        return {
-            "current_spend_rate": 0.045, # USD/sec
-            "daily_budget_used": 142.50,
-            "daily_budget_limit": 500.00,
-            "risk_score": 0.02,
-            "agent_reputation": "HIGH"
-        }
+    def _get_auth_policy(self, agent_id: str, workflow_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Queries the auth-service for the effective policy for this agent/workflow."""
+        try:
+            params = {"agent_id": agent_id}
+            if workflow_id:
+                params["workflow_id"] = workflow_id
+            
+            response = requests.get(f"{AUTH_SERVICE_URL}/internal/effective-policy", params=params, timeout=2)
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch policy from auth-service: {e}")
+        return None
 
     def evaluate(self, transaction: Dict[str, Any]) -> PolicyDecision:
-        rules = self.get_active_rules()
         agent_id = transaction.get("agent_id", "default")
+        workflow_id = transaction.get("metadata", {}).get("workflow_id")
         
-        # Prepare evaluation context (Transaction + Telemetry/Metering)
+        # 1. Fetch RBAC/ABAC Policy from Auth System
+        auth_policy = self._get_auth_policy(agent_id, workflow_id)
+        if not auth_policy:
+            return PolicyDecision(
+                decision="REJECT",
+                reason="Identity/Permission Error: No active policy found for this agent"
+            )
+
+        # 2. Perform ABAC Checks
+        attrs = auth_policy.get("attributes", {})
+        
+        # Check Task Cost Ceiling
+        amount = float(transaction.get("amount", 0))
+        ceiling = float(attrs.get("task_cost_ceiling", 0))
+        if ceiling > 0 and amount > ceiling:
+            return PolicyDecision(
+                decision="REJECT",
+                reason=f"ABAC Violation: Transaction amount {amount} exceeds task cost ceiling of {ceiling}"
+            )
+
+        # Check Context Patterns (Regex)
+        allowed_patterns = attrs.get("allowed_context_patterns", [])
+        if allowed_patterns:
+            context_str = json.dumps(transaction.get("context", {}))
+            matched = False
+            for pattern in allowed_patterns:
+                if re.search(pattern, context_str):
+                    matched = True
+                    break
+            if not matched:
+                return PolicyDecision(
+                    decision="REJECT",
+                    reason="ABAC Violation: Transaction context does not match allowed patterns"
+                )
+
+        # Check Daily Budget
+        daily_limit = float(attrs.get("daily_budget", 0))
+        if daily_limit > 0:
+            metering = self._get_metering_data(agent_id)
+            current_spent = metering.get("daily_budget_used", 0)
+            if current_spent + amount > daily_limit:
+                return PolicyDecision(
+                    decision="REJECT",
+                    reason=f"ABAC Violation: Daily budget exceeded ({current_spent + amount} > {daily_limit})"
+                )
+
+        # 3. Evaluate Rule-based Logic (if any additional rules are active)
+        rules = self.get_active_rules()
         context = {
             "tx": transaction,
-            "amount": float(transaction.get("amount", 0)),
+            "amount": amount,
             "currency": transaction.get("currency", "USD"),
-            "metering": self._get_metering_data(agent_id),
+            "policy": auth_policy,
             "env": os.getenv("APP_ENV", "production")
         }
 
-        logger.info(f"Evaluating {len(rules)} rules for transaction {transaction.get('transaction_id')}")
+        if not rules:
+            # If no specific rules, but ABAC passed, we can default to Approve if the policy says so
+            # or if 'executor' role is present.
+            if "executor" in auth_policy.get("roles", []):
+                return PolicyDecision(decision="APPROVE", reason="ABAC passed and agent has executor role")
+            return PolicyDecision(decision="REJECT", reason="ABAC passed but no explicit rules or roles for execution")
 
         for rule in rules:
             try:
-                # Short-circuiting evaluation logic
                 is_match = True
                 for condition in rule.conditions:
                     if not self._evaluate_condition(condition, context):
@@ -99,31 +154,19 @@ class PolicyEngine:
                         break
                 
                 if is_match:
-                    logger.info(f"Rule {rule.rule_id} (Priority {rule.priority}) MATCHED")
-                    
                     action_type = rule.actions.get("type", "approve").upper()
-                    decision_str = "APPROVE"
-                    if action_type == "REJECT":
-                        decision_str = "REJECT"
-                    elif action_type == "ROUTE_TO_RAIL":
-                        decision_str = "ROUTE"
-
                     return PolicyDecision(
-                        decision=decision_str,
+                        decision="APPROVE" if action_type != "REJECT" else "REJECT",
                         selected_rails=rule.actions.get("rails", []),
                         modifications=rule.parameters or {},
                         rule_id=str(rule.rule_id),
                         reason=rule.actions.get("reason", f"Matched priority {rule.priority}")
                     )
             except Exception as e:
-                logger.error(f"Rule evaluation error [Rule: {rule.rule_id}]: {e}")
+                logger.error(f"Rule evaluation error: {e}")
                 continue
 
-        # Default fallback: Reject if no rules match (Zero Trust)
-        return PolicyDecision(
-            decision="REJECT",
-            reason="Security Default: No policy rules matched this request"
-        )
+        return PolicyDecision(decision="REJECT", reason="No specific rules matched")
 
     def _evaluate_condition(self, expression: str, context: Dict[str, Any]) -> bool:
         """
