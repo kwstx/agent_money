@@ -1,0 +1,43 @@
+replicaCount: 2
+
+image:
+  repository: agent-money/service
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8080
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # Custom metrics for queue depth or latency can be added here
+  customMetrics:
+    - name: queue_depth
+      target: 50
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+env: []
+# - name: DB_URL
+#   value: "postgres://..."
+
+secrets: []
+# - name: API_KEY
+#   secretName: my-secret
+#   secretKey: api-key

@@ -16,6 +16,8 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/galan/agent_money/pkg/telemetry"
+	"kwstx/agent_money/pkg/secrets"
+	"kwstx/agent_money/pkg/wallet"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -104,8 +106,17 @@ func main() {
 	}
 	publisher := metering.NewEventPublisher(kafkaURL, "financial-events")
 
+	// Initialize Secret and Wallet Management
+	secretProvider := &secrets.EnvProvider{}
+	// Master key should be loaded from a secure source in production
+	masterKey := []byte(os.Getenv("MASTER_KEY"))
+	if len(masterKey) == 0 {
+		masterKey = []byte("default-dev-master-key-32-chars-long")
+	}
+	walletManager := wallet.NewWalletManager(masterKey)
+
 	// Initialize Rail Registry and Discovery
-	registry := adapters.InitializeDefaultRegistry(ctx)
+	registry := adapters.InitializeDefaultRegistry(ctx, secretProvider, walletManager)
 	registry.StartDiscovery(ctx, 1*time.Minute)
 
 	// Initialize Routing Engine and Saga Coordinator

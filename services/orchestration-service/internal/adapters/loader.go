@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"kwstx/agent_money/pkg/secrets"
+	"kwstx/agent_money/pkg/wallet"
 )
 
 // Config represents the adapter configuration file structure
@@ -19,7 +22,7 @@ type AdapterConfig struct {
 }
 
 // LoadFromConfig populates the registry based on a JSON configuration file
-func LoadFromConfig(registry *RailRegistry, configPath string) error {
+func LoadFromConfig(registry *RailRegistry, configPath string, sp secrets.SecretProvider, wm *wallet.WalletManager) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to read adapter config: %w", err)
@@ -35,7 +38,7 @@ func LoadFromConfig(registry *RailRegistry, configPath string) error {
 		
 		switch aCfg.Type {
 		case "lightning":
-			adapter = NewLightningAdapter()
+			adapter = NewLightningAdapter(sp, wm)
 		case "stripe":
 			adapter = NewStripeAdapter()
 		case "stablecoin":
@@ -55,11 +58,11 @@ func LoadFromConfig(registry *RailRegistry, configPath string) error {
 }
 
 // InitializeDefaultRegistry creates a registry with hardcoded defaults if no config is found
-func InitializeDefaultRegistry(ctx context.Context) *RailRegistry {
+func InitializeDefaultRegistry(ctx context.Context, sp secrets.SecretProvider, wm *wallet.WalletManager) *RailRegistry {
 	registry := NewRailRegistry()
 	
 	// Default set
-	registry.Register(NewResilienceWrapper(NewLightningAdapter()))
+	registry.Register(NewResilienceWrapper(NewLightningAdapter(sp, wm)))
 	registry.Register(NewResilienceWrapper(NewStripeAdapter()))
 	registry.Register(NewResilienceWrapper(NewStablecoinAdapter("solana")))
 	registry.Register(NewResilienceWrapper(NewStablecoinAdapter("ethereum")))

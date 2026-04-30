@@ -1,0 +1,60 @@
+name: Deploy Agent Money
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    - name: Run Go Tests
+      run: go test ./...
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    - name: Install Python Dependencies
+      run: |
+        pip install -r services/policy-engine/requirements.txt
+        pip install pytest
+    - name: Run Python Tests
+      run: pytest services/policy-engine/test_policy.py
+
+  deploy-staging:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Deploy to Staging (Testnet/Sandbox)
+      run: |
+        echo "Deploying to staging namespace..."
+        # helm upgrade --install agent-money ./deploy/helm/agent-money-service -n staging --set global.mode=sandbox
+    
+  deploy-production:
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - uses: actions/checkout@v3
+    - name: Canary Deployment
+      run: |
+        echo "Starting Canary deployment..."
+        # helm upgrade --install agent-money-canary ./deploy/helm/agent-money-service -n production --set replicaCount=1 --set image.tag=canary
+    - name: Verify Canary
+      run: |
+        echo "Verifying health metrics..."
+        # Check Prometheus for error spikes
+    - name: Full Rollout (Blue-Green)
+      run: |
+        echo "Rolling out to all pods..."
+        # helm upgrade --install agent-money ./deploy/helm/agent-money-service -n production --set image.tag=latest

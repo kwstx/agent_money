@@ -7,14 +7,21 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"kwstx/agent_money/pkg/secrets"
+	"kwstx/agent_money/pkg/wallet"
 )
 
 type LightningAdapter struct {
 	// lndClient *lnd.Client 
+	secrets secrets.SecretProvider
+	wallets *wallet.WalletManager
 }
 
-func NewLightningAdapter() *LightningAdapter {
-	return &LightningAdapter{}
+func NewLightningAdapter(sp secrets.SecretProvider, wm *wallet.WalletManager) *LightningAdapter {
+	return &LightningAdapter{
+		secrets: sp,
+		wallets: wm,
+	}
 }
 
 func (a *LightningAdapter) GetID() string {
@@ -31,14 +38,21 @@ func (a *LightningAdapter) Execute(ctx context.Context, tx Transaction) (*Execut
 
 	log.Printf("[Lightning] Amount: %.8f %s -> %d sats", tx.Amount, tx.Currency, sats)
 
-	// 2. Generate BOLT11 invoice or use keysend
+	// 2. Derive agent-specific sub-wallet for secure signing/keysend
+	agentKey, err := a.wallets.DeriveSubWallet(tx.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("lightning: failed to derive agent wallet: %w", err)
+	}
+	log.Printf("[Lightning] Using derived key for agent %s (hash: %x...)", tx.AgentID, agentKey[:8])
+
+	// 3. Generate BOLT11 invoice or use keysend
 	var method string
 	if invoice, ok := tx.Context["bolt11"].(string); ok {
 		method = "bolt11"
 		log.Printf("[Lightning] Paying BOLT11 invoice: %s", invoice)
 	} else if pubkey, ok := tx.Context["destination_pubkey"].(string); ok {
 		method = "keysend"
-		log.Printf("[Lightning] Direct keysend to: %s", pubkey)
+		log.Printf("[Lightning] Direct keysend to: %s using agent key", pubkey)
 	} else {
 		return nil, fmt.Errorf("lightning: missing bolt11 invoice or destination_pubkey")
 	}
