@@ -17,10 +17,11 @@ import (
 )
 
 var (
-	redisClient   *redis.Client
-	routingEngine *routing.RoutingEngine
-	repo          *repository.PostgresRepository
-	ctx           = context.Background()
+	redisClient      *redis.Client
+	routingEngine    *routing.RoutingEngine
+	sagaCoordinator  *routing.SagaCoordinator
+	repo             *repository.PostgresRepository
+	ctx              = context.Background()
 )
 
 type SpendRequest struct {
@@ -39,7 +40,6 @@ type SpendResponse struct {
 }
 
 func main() {
-	// Initialize Redis
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		redisURL = "localhost:6379"
@@ -48,7 +48,6 @@ func main() {
 		Addr: redisURL,
 	})
 
-	// Initialize Postgres
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://admin:password@localhost:5432/agent_money?sslmode=disable"
@@ -59,12 +58,13 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Initialize Routing Engine
+	// Initialize Routing Engine and Saga Coordinator
 	routingEngine = routing.NewRoutingEngine()
+	sagaCoordinator = routing.NewSagaCoordinator(routingEngine, repo)
 
 	// Start HTTP server
 	http.HandleFunc("/spend", spendHandler)
-	fmt.Println("Orchestration Service (v2 with Dynamic Routing) listening on :8080")
+	fmt.Println("Orchestration Service (v3 with Saga & Resilience) listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
@@ -107,53 +107,27 @@ func spendHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	tx.Context["agent_id"] = agentID
 
-	// 2. Fetch Policy Results (Mocked call to policy engine)
-	// In reality, this would be an HTTP call to the policy-engine service
-	policyResults := mockPolicyCall(tx)
-
-	if policyResults["decision"] == "REJECT" {
-		http.Error(w, "Transaction rejected by policy engine", http.StatusForbidden)
+	// 2. Orchestrate via Saga Coordinator
+	// This handles Policy -> Routing -> Execution (with Fallback & Retries) -> Metering
+	result, err := sagaCoordinator.Orchestrate(ctx, tx, mockPolicyCall)
+	if err != nil {
+		log.Printf("Orchestration failed for tx %s: %v", txID, err)
+		http.Error(w, fmt.Sprintf("Orchestration failed: %v", err), http.StatusServiceUnavailable)
 		return
 	}
 
-	// 3. Compute Routing Plan
-	plan, err := routingEngine.ComputePlan(ctx, tx, policyResults)
-	if err != nil {
-		log.Printf("Routing failed: %v", err)
-		http.Error(w, "No viable payment rail found", http.StatusServiceUnavailable)
-		return
-	}
-
-	// 4. Persist Execution Plan (BEFORE Dispatching)
-	planID, err := repo.CreateExecutionPlan(ctx, txID, plan)
-	if err != nil {
-		log.Printf("Persistence failed: %v", err)
-		// We can still proceed, but persistence is required by the prompt
-	}
-
-	// 5. Dispatch to Adapter
-	providerTxID, err := routingEngine.Dispatch(ctx, tx, plan)
-	if err != nil {
-		log.Printf("Dispatch failed: %v", err)
-		repo.UpdatePlanStatus(ctx, planID, "failed")
-		http.Error(w, fmt.Sprintf("Execution failed: %v", err), http.StatusGatewayTimeout)
-		return
-	}
-
-	// 6. Success - Update status and return
-	repo.UpdatePlanStatus(ctx, planID, "executed")
-
+	// 3. Success - Return response
 	resp := SpendResponse{
 		TransactionID: txID,
-		Status:        "SUCCESS",
-		Rail:          plan.AdapterID,
-		Cost:          fmt.Sprintf("%.4f", plan.EstimatedCost),
+		Status:        result.Status,
+		Rail:          result.ProviderID, // Or the adapter ID if preferred
+		Cost:          "estimated",       // In a real system, get actual cost from result
 	}
 	
 	respJSON, _ := json.Marshal(resp)
 	redisClient.Set(ctx, req.RequestID, respJSON, 24*time.Hour)
 
-	log.Printf("Transaction %s completed via %s (Provider ID: %s)", txID, plan.AdapterID, providerTxID)
+	log.Printf("Transaction %s completed successfully (Provider ID: %s)", txID, result.ProviderID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

@@ -62,3 +62,16 @@ func (r *PostgresRepository) UpdatePlanStatus(ctx context.Context, planID string
 	_, err := r.db.ExecContext(ctx, query, status, planID)
 	return err
 }
+
+func (r *PostgresRepository) LogAuditStep(ctx context.Context, txID string, step string, adapterID string, status string, errMsg string, metadata map[string]interface{}) error {
+	metaJSON, _ := json.Marshal(metadata)
+	query := `
+		INSERT INTO audit_trail (transaction_id, step, adapter_id, status, error_message, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := r.db.ExecContext(ctx, query, txID, step, adapterID, status, errMsg, metaJSON)
+	if err != nil {
+		fmt.Printf("[AuditLog Error] %v\n", err)
+	}
+	return err
+}

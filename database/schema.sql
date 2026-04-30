@@ -57,3 +57,17 @@ CREATE TABLE execution_plans (
 );
 
 CREATE INDEX idx_execution_plans_transaction_id ON execution_plans(transaction_id);
+
+-- Immutable Audit Trail for Resilience and Compliance
+CREATE TABLE audit_trail (
+    audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID NOT NULL REFERENCES transactions(transaction_id),
+    step VARCHAR(50) NOT NULL, -- e.g., 'policy_check', 'routing', 'execution_attempt', 'metering_update'
+    adapter_id VARCHAR(50),    -- optional, for execution steps
+    status VARCHAR(20) NOT NULL, -- 'success', 'failure', 'retry'
+    error_message TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_audit_trail_transaction_id ON audit_trail(transaction_id);
