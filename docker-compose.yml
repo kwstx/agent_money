@@ -73,6 +73,19 @@ services:
       TRANSACTION_HANDLER_URL: http://transaction-handler:8080
       DATABASE_URL: postgres://admin:password@postgres:5432/agent_money?sslmode=disable
 
+  metering-service:
+    build:
+      context: ./services/metering-service
+    depends_on:
+      - kafka
+      - postgres
+      - redis
+    environment:
+      KAFKA_URL: kafka:29092
+      DATABASE_URL: postgres://admin:password@postgres:5432/agent_money?sslmode=disable
+      REDIS_URL: redis:6379
+      METERING_TOPIC: financial-events
+
   kong:
     image: kong:latest
     volumes:

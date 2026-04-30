@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/galan/agent_money/services/orchestration-service/internal/adapters"
+	"github.com/galan/agent_money/services/orchestration-service/internal/metering"
 	"github.com/avast/retry-go/v4"
+	"github.com/google/uuid"
 )
 
 type AuditLogger interface {
@@ -17,14 +19,16 @@ type AuditLogger interface {
 type SagaCoordinator struct {
 	Engine         *RoutingEngine
 	AuditLogger    AuditLogger
+	Publisher      *metering.EventPublisher
 	MaxRetryCounts map[string]int
 	GlobalTimeout  time.Duration
 }
 
-func NewSagaCoordinator(engine *RoutingEngine, logger AuditLogger) *SagaCoordinator {
+func NewSagaCoordinator(engine *RoutingEngine, logger AuditLogger, publisher *metering.EventPublisher) *SagaCoordinator {
 	return &SagaCoordinator{
 		Engine:      engine,
 		AuditLogger: logger,
+		Publisher:   publisher,
 		MaxRetryCounts: map[string]int{
 			"lightning":  3,
 			"stripe":     1,
@@ -71,7 +75,32 @@ func (s *SagaCoordinator) Orchestrate(ctx context.Context, tx adapters.Transacti
 		return nil, err
 	}
 
-	// 4. Metering Update (Simulated)
+	// 4. Metering Update (Asynchronous Event-Driven)
+	s.AuditLogger.LogAuditStep(ctx, tx.ID, "metering_update", result.ProviderID, "pending", "", nil)
+	
+	event := metering.FinancialEvent{
+		EventID:       uuid.New().String(),
+		TransactionID: tx.ID,
+		AgentID:       tx.AgentID, // Assuming Transaction has AgentID
+		RailUsed:      result.ProviderID,
+		BilledAmount:  tx.Amount,
+		Currency:      tx.Currency,
+		Status:        "executed",
+		Timestamp:     time.Now(),
+		ActionDetails: map[string]string{
+			"orchestration_status": "success",
+		},
+	}
+	
+	// Fire-and-forget publishing
+	go func() {
+		pubCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.Publisher.PublishFinancialEvent(pubCtx, event); err != nil {
+			log.Printf("[Saga] Failed to publish metering event for TX %s: %v", tx.ID, err)
+		}
+	}()
+
 	s.AuditLogger.LogAuditStep(ctx, tx.ID, "metering_update", result.ProviderID, "success", "", nil)
 	s.AuditLogger.LogAuditStep(ctx, tx.ID, "final_status", result.ProviderID, "success", "", nil)
 

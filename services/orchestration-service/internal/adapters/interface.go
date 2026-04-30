@@ -7,6 +7,7 @@ import (
 // Transaction represents the unified canonical data model for a payment
 type Transaction struct {
 	ID          string                 `json:"transaction_id"`
+	AgentID     string                 `json:"agent_id"`
 	Amount      float64                `json:"amount"`
 	Currency    string                 `json:"currency"`
 	Context     map[string]interface{} `json:"context"`

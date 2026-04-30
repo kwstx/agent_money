@@ -1,6 +1,7 @@
 -- Transactions table (PostgreSQL)
 CREATE TABLE transactions (
     transaction_id UUID PRIMARY KEY,
+    agent_id UUID NOT NULL,
     amount DECIMAL NOT NULL,
     currency VARCHAR(3) NOT NULL,
     rail_type VARCHAR(20) NOT NULL,
@@ -71,3 +72,29 @@ CREATE TABLE audit_trail (
 );
 
 CREATE INDEX idx_audit_trail_transaction_id ON audit_trail(transaction_id);
+
+-- Budgets table for historical tracking and enforcement
+CREATE TABLE budgets (
+    agent_id UUID NOT NULL,
+    currency VARCHAR(3) NOT NULL,
+    total_spent DECIMAL DEFAULT 0,
+    daily_limit DECIMAL,
+    monthly_limit DECIMAL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (agent_id, currency)
+);
+
+-- Ledger entries for double-entry accounting
+-- Every transaction should have at least two entries: a debit and a credit.
+CREATE TABLE ledger_entries (
+    entry_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID NOT NULL REFERENCES transactions(transaction_id),
+    account_id VARCHAR(100) NOT NULL, -- e.g., 'agent_wallet', 'platform_revenue', 'rail_liquidity'
+    amount DECIMAL NOT NULL, -- Positive for credit, negative for debit
+    entry_type VARCHAR(20) NOT NULL, -- 'settlement', 'fee', 'refund'
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_ledger_transaction_id ON ledger_entries(transaction_id);
+CREATE INDEX idx_ledger_account_id ON ledger_entries(account_id);

@@ -12,6 +12,7 @@ import (
 	"github.com/galan/agent_money/services/orchestration-service/internal/adapters"
 	"github.com/galan/agent_money/services/orchestration-service/internal/repository"
 	"github.com/galan/agent_money/services/orchestration-service/internal/routing"
+	"github.com/galan/agent_money/services/orchestration-service/internal/metering"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
@@ -58,9 +59,16 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
+	// Initialize Metering Publisher
+	kafkaURL := os.Getenv("KAFKA_URL")
+	if kafkaURL == "" {
+		kafkaURL = "localhost:9092"
+	}
+	publisher := metering.NewEventPublisher(kafkaURL, "financial-events")
+
 	// Initialize Routing Engine and Saga Coordinator
 	routingEngine = routing.NewRoutingEngine()
-	sagaCoordinator = routing.NewSagaCoordinator(routingEngine, repo)
+	sagaCoordinator = routing.NewSagaCoordinator(routingEngine, repo, publisher)
 
 	// Start HTTP server
 	http.HandleFunc("/spend", spendHandler)
@@ -97,6 +105,7 @@ func spendHandler(w http.ResponseWriter, r *http.Request) {
 	txID := uuid.New().String()
 	tx := adapters.Transaction{
 		ID:          txID,
+		AgentID:     agentID,
 		Amount:      req.Amount,
 		Currency:    req.Currency,
 		Context:     req.Context,

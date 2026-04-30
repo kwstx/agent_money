@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package agent_money.v1;
+
+option go_package = "github.com/galan/agent_money/proto/v1";
+
+import "google/protobuf/timestamp.proto";
+
+message FinancialEvent {
+    string event_id = 1;
+    string transaction_id = 2;
+    string agent_id = 3;
+    string rail_used = 4;
+    double billed_amount = 5;
+    string currency = 6;
+    string status = 7; // e.g., "executed", "settled", "refunded"
+    map<string, string> action_details = 8;
+    google.protobuf.Timestamp timestamp = 9;
+}
