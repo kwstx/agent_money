@@ -25,12 +25,12 @@ func NewRoutingEngine() *RoutingEngine {
 	engine := &RoutingEngine{
 		Adapters: make(map[string]adapters.RailAdapter),
 	}
-	// Register default adapters
-	engine.RegisterAdapter(adapters.NewLightningAdapter())
-	engine.RegisterAdapter(adapters.NewStripeAdapter())
-	engine.RegisterAdapter(adapters.NewStablecoinAdapter("solana"))
-	engine.RegisterAdapter(adapters.NewStablecoinAdapter("ethereum"))
-	engine.RegisterAdapter(adapters.NewX402Adapter())
+	// Register default adapters with resilience wrappers
+	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewLightningAdapter()))
+	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewStripeAdapter()))
+	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewStablecoinAdapter("solana")))
+	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewStablecoinAdapter("ethereum")))
+	engine.RegisterAdapter(adapters.NewResilienceWrapper(adapters.NewX402Adapter()))
 	
 	return engine
 }
@@ -128,12 +128,12 @@ func (e *RoutingEngine) Dispatch(ctx context.Context, tx adapters.Transaction, p
 			log.Printf("[Router] Trying fallback: %s", fallbackID)
 			res, fErr := fallbackAdapter.Execute(ctx, tx)
 			if fErr == nil {
-				return res, nil
+				return res.ProviderID, nil
 			}
 			log.Printf("[Router] Fallback %s failed: %v", fallbackID, fErr)
 		}
 		return "", fmt.Errorf("all adapters in execution plan failed: last error: %v", err)
 	}
 
-	return result, nil
+	return result.ProviderID, nil
 }
