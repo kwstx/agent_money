@@ -42,3 +42,18 @@ CREATE TABLE rules (
 -- Index for priority evaluation
 CREATE INDEX idx_rules_priority ON rules (priority ASC) WHERE active = TRUE;
 
+-- Execution Plans table for Dynamic Routing
+CREATE TABLE execution_plans (
+    plan_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID NOT NULL REFERENCES transactions(transaction_id),
+    adapter_id VARCHAR(50) NOT NULL,
+    score FLOAT NOT NULL,
+    estimated_cost DECIMAL,
+    estimated_latency INTEGER, -- in ms
+    fallback_chain JSONB,       -- Ordered list of adapter_ids to try if this one fails
+    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'pending', 'executed', 'failed'
+    policy_metadata JSONB,      -- Snapshots of policy engine output that led to this decision
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_execution_plans_transaction_id ON execution_plans(transaction_id);
