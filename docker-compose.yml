@@ -89,6 +89,16 @@ services:
       REDIS_URL: redis:6379
       METERING_TOPIC: financial-events
 
+  reconciliation-worker:
+    build:
+      context: ./services/reconciliation-worker
+    depends_on:
+      - postgres
+      - kafka
+    environment:
+      DATABASE_URL: postgresql://admin:password@postgres:5432/agent_money
+      OTEL_COLLECTOR_URL: http://otel-collector:4317
+
   kong:
     image: kong:latest
     volumes:

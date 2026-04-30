@@ -75,3 +75,13 @@ func (r *PostgresRepository) LogAuditStep(ctx context.Context, txID string, step
 	}
 	return err
 }
+
+func (r *PostgresRepository) CreateExternalConfirmation(ctx context.Context, txID string, extID string, railType string, amount float64, currency string, status string, rawData map[string]interface{}) error {
+	rawJSON, _ := json.Marshal(rawData)
+	query := `
+		INSERT INTO external_confirmations (transaction_id, external_id, rail_type, amount, currency, status, raw_data)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+	_, err := r.db.ExecContext(ctx, query, txID, extID, railType, amount, currency, status, rawJSON)
+	return err
+}

@@ -190,3 +190,54 @@ CREATE TABLE policy_approvals (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     decided_at TIMESTAMP WITH TIME ZONE
 );
+
+-- Reconciliation System
+
+-- Track reconciliation runs
+CREATE TABLE reconciliation_runs (
+    run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) NOT NULL, -- 'running', 'completed', 'failed'
+    summary JSONB -- e.g., {"matched": 100, "discrepancies": 2, "adjustments": 2}
+);
+
+-- External confirmations from rails (ingested via webhooks/polling)
+CREATE TABLE external_confirmations (
+    confirmation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    external_id VARCHAR(255) NOT NULL, -- Stripe ID, Tx Hash, etc.
+    transaction_id UUID REFERENCES transactions(transaction_id),
+    rail_type VARCHAR(20) NOT NULL,
+    amount DECIMAL NOT NULL,
+    currency VARCHAR(3) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    raw_data JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    reconciled_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_external_confirmations_external_id ON external_confirmations(external_id);
+CREATE INDEX idx_external_confirmations_transaction_id ON external_confirmations(transaction_id);
+
+-- Discrepancies found during reconciliation
+CREATE TABLE discrepancies (
+    discrepancy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id UUID REFERENCES reconciliation_runs(run_id),
+    transaction_id UUID REFERENCES transactions(transaction_id),
+    confirmation_id UUID REFERENCES external_confirmations(confirmation_id),
+    description TEXT NOT NULL,
+    severity VARCHAR(20) NOT NULL, -- 'low', 'medium', 'high', 'critical'
+    resolved BOOLEAN DEFAULT FALSE,
+    resolution_metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Exchange Rates for Multi-currency Reconciliation
+CREATE TABLE exchange_rates (
+    from_currency VARCHAR(3) NOT NULL,
+    to_currency VARCHAR(3) NOT NULL,
+    rate DECIMAL NOT NULL,
+    source VARCHAR(50) NOT NULL, -- e.g., 'chainlink', 'coinbase', 'manual'
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (from_currency, to_currency)
+);

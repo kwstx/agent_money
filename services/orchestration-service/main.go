@@ -45,6 +45,16 @@ type SpendResponse struct {
 	Cost          string `json:"estimated_cost"`
 }
 
+type WebhookRequest struct {
+	TransactionID string                 `json:"transaction_id"`
+	ExternalID    string                 `json:"external_id"`
+	RailType      string                 `json:"rail_type"`
+	Amount        float64                `json:"amount"`
+	Currency      string                 `json:"currency"`
+	Status        string                 `json:"status"`
+	RawData       map[string]interface{} `json:"raw_data"`
+}
+
 func main() {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
@@ -100,6 +110,7 @@ func main() {
 
 	// Start HTTP server
 	http.HandleFunc("/spend", spendHandler)
+	http.HandleFunc("/webhook", webhookHandler)
 	http.Handle("/metrics", promExporter)
 	
 	logger.Info("Orchestration Service (v3 with Saga & Resilience) listening on :8080")
@@ -211,4 +222,33 @@ func mockPolicyCall(tx adapters.Transaction) map[string]interface{} {
 			"stripe":    0.5, // Penalize stripe
 		},
 	}
+}
+
+func webhookHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := telemetry.Tracer.Start(r.Context(), "webhookHandler")
+	defer span.End()
+
+	logger := telemetry.GetLogger()
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req WebhookRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("Failed to decode webhook body", zap.Error(err))
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	err := repo.CreateExternalConfirmation(ctx, req.TransactionID, req.ExternalID, req.RailType, req.Amount, req.Currency, req.Status, req.RawData)
+	if err != nil {
+		logger.Error("Failed to store external confirmation", zap.Error(err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("Received external confirmation", zap.String("external_id", req.ExternalID), zap.String("tx_id", req.TransactionID))
+	w.WriteHeader(http.StatusAccepted)
 }
